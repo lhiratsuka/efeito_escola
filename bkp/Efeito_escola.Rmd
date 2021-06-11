@@ -1,0 +1,286 @@
+---
+title: "Efeito_Escola"
+author: "Livia Kobayashi"
+date: "18/03/2021"
+output: html_document
+---
+# Library
+```{r}
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(ranger)
+```
+# Import
+```{r}
+#TS_RESULTADO_ALUNO ----
+url <- "data/microdados_prova_brasil_2011/Microdados Prova Brasil 2011/Dados/TS_RESULTADO_ALUNO.csv"
+ts_resultado_aluno2011 <- read.csv2(url)
+ts_resultado_aluno2011 <-  ts_resultado_aluno2011 %>%filter(ID_UF == 35)
+
+#TS_QUEST_ALUNO ----
+url <- "data/microdados_prova_brasil_2011/Microdados Prova Brasil 2011/Dados/TS_QUEST_ALUNO.csv"
+ts_quest_aluno_2011 <- read.csv2(url)
+ts_quest_aluno_2011 <-  ts_quest_aluno_2011 %>%filter(ID_UF == 35)
+
+# CENSO ESCOLA ----
+url <- "data/micro_censo_escolar_2011/2011/DADOS/ESCOLAS.CSV"
+censo_escolar <- read.delim(url, sep = "|")
+
+# IBGE
+ibge <- read_xls("data/estimativa_dou_2020.xls", sheet = 2, skip = 1)[1:5570,]
+colnames(ibge) <- c("uf", "cod_uf", "cod_municipio", "nome_municipio", "pop_estimada")
+ibge <- ibge %>% mutate(pk = as.integer(str_c(cod_uf, cod_municipio)))
+
+# QUESTIONARIO
+url <- "data/microdados_prova_brasil_2011/Microdados Prova Brasil 2011/Dicionário/Dicionario_Prova_Brasil_2011.xlsx"
+label_quest_aluno <- read_xlsx(url, sheet = "TS_QUEST_ALUNO", skip = 27)
+label_quest_aluno_5serie <- data.frame(questao = label_quest_aluno$...1[1:54], 
+                                       enunciado = label_quest_aluno$Enunciado[1:54])
+label_quest_aluno_9serie <- data.frame(questao = label_quest_aluno$...1[59:116],
+                                         enunciado = label_quest_aluno$Enunciado[59:116])
+
+
+```
+
+# Fontes
+https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/prova-brasil
+https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/censo-escolar
+https://www.ibge.gov.br/estatisticas/sociais/populacao/9103-estimativas-de-populacao.html?=&t=resultados
+
+# Ref Provra Brasil
+2007, 2009, 2011
+
+# Qtd. bases Prova Brasil: 10
+
+```{r}
+list.files("data/microdados_prova_brasil_2011/Microdados Prova Brasil 2011/Dados/")
+```
+desconsiderar: TS_RESPOSTA_ALUNO.csv
+
+
+# Tamanho dos dados
+```{r}
+bases_prova <- ls(pattern = "ts")
+for (variable in bases_prova) {
+  print(paste0(variable, ": ",nrow(eval(parse(text = variable))), ",", ncol(eval(parse(text = variable)))))
+}
+```
+
+
+# Qtd. bases Censo: 16
+```{r}
+list.files("data/micro_censo_escolar_2011/2011/DADOS")
+```
+
+# Comparativo qtd.escola
+```{r}
+ts_resultado_escola_2011 %>% 
+  filter(ID_UF == 35) %>% 
+  group_by(ID_SERIE, ID_DEPENDENCIA_ADM) %>% 
+  summarise(qtd_escolas = n()) %>% 
+  ungroup() %>% 
+  group_by(ID_SERIE) %>% 
+  mutate(total_serie = sum(qtd_escolas),
+         perc_estado = qtd_escolas/total_serie*100)
+```
+
+# Comparativo qtd.aluno
+```{r}
+ts_resultado_aluno2011 %>% 
+  filter(ID_UF ==35, IN_PREENCHIMENTO == 1) %>% 
+  group_by(ID_SERIE, ID_DEPENDENCIA_ADM) %>% 
+  summarise(qtd_alunos = n())
+  
+```
+
+# R2 Univariada
+
+Cruza questionário com resultado dos alunos
+```{r}
+df <- ts_resultado_aluno2011 %>% 
+  filter(ID_UF == 35) %>% 
+  left_join(
+    censo_escolar[,c("PK_COD_ENTIDADE", "NO_ENTIDADE")], 
+                     by = c("ID_ESCOLA" = "PK_COD_ENTIDADE")) %>% 
+  left_join(ibge, by = c("ID_MUNICIPIO" = "pk"))
+
+
+ts_quest_aluno_2011 <- ts_quest_aluno_2011 %>% 
+  select(ID_ALUNO, TX_RESP_Q001:TX_RESP_Q058)
+
+df <- df %>% 
+  left_join(ts_quest_aluno_2011, by = "ID_ALUNO") %>% 
+  mutate(ID_LOCALIZACAO = as.factor(ID_LOCALIZACAO),
+         ID_DEPENDENCIA_ADM = as.factor(ID_DEPENDENCIA_ADM))
+```
+
+
+## 5ª serie
+```{r}
+df_5serie <-  df %>% 
+  filter(IN_PREENCHIMENTO == 1, IN_PROFICIENCIA == 1,
+         ID_SERIE == 5, ID_DEPENDENCIA_ADM ==2) %>% 
+  select(PROFICIENCIA_LP, 
+         PROFICIENCIA_LP_SAEB,
+         PROFICIENCIA_MT,
+         PROFICIENCIA_MT_SAEB,
+         ID_LOCALIZACAO,
+         ID_DEPENDENCIA_ADM,
+         pop_estimada,
+         TX_RESP_Q001:TX_RESP_Q054) %>% 
+  mutate_if(is_character, as.factor)
+```
+
+
+```{r}
+vars_5serie <- colnames(df_5serie)
+vars_5serie <- vars_5serie[8:length(vars_5serie)]
+vars_5serie
+```
+
+```{r}
+y_resp <- "PROFICIENCIA_LP"
+
+tb_r2_5serie <- data.frame(var = vars_5serie, 
+                           label = label_quest_aluno_5serie$enunciado)
+
+rsquared <- c()
+for (variable in vars_5serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_5serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$LP <- rsquared
+
+tb_r2_5serie %>% arrange(desc(LP)) %>% select(label) %>% head()
+```
+
+
+
+```{r}
+y_resp <- "PROFICIENCIA_MT"
+rsquared <- c()
+for (variable in vars_5serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_5serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$MT <- rsquared
+
+tb_r2_5serie %>% arrange(desc(MT)) %>% select(label) %>% head()
+```
+## 9ª serie
+```{r}
+df_9serie <-  df %>% 
+  filter(IN_PREENCHIMENTO == 1, IN_PROFICIENCIA == 1,
+         ID_SERIE == 9, ID_DEPENDENCIA_ADM ==2) %>% 
+  select(PROFICIENCIA_LP, 
+         PROFICIENCIA_LP_SAEB,
+         PROFICIENCIA_MT,
+         PROFICIENCIA_MT_SAEB,
+         ID_LOCALIZACAO,
+         ID_DEPENDENCIA_ADM,
+         pop_estimada,
+         TX_RESP_Q001:TX_RESP_Q058) %>% 
+  mutate_if(is_character, as.factor)
+```
+
+
+
+```{r}
+vars_9serie <- colnames(df_9serie)
+vars_9serie <- vars_9serie[8:length(vars_9serie)]
+vars_9serie
+```
+
+
+```{r}
+y_resp <- "PROFICIENCIA_LP"
+
+tb_r2_9serie <- data.frame(var = vars_9serie, 
+                           label = label_quest_aluno_9serie$enunciado)
+
+rsquared <- c()
+for (variable in vars_9serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_9serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_9serie$LP <- rsquared
+
+tb_r2_9serie %>% arrange(desc(LP)) %>% select(label) %>% head()
+```
+
+
+```{r}
+y_resp <- "PROFICIENCIA_MT"
+rsquared <- c()
+for (variable in vars_9serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_9serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_9serie$MT <- rsquared
+
+tb_r2_9serie %>% arrange(desc(MT)) %>% select(label) %>% head()
+```
+
+
+# Model
+
+5 serie LP
+```{r}
+model_5serie_lp <- ranger(data = df_5serie %>% select(-PROFICIENCIA_LP_SAEB, - PROFICIENCIA_MT, - PROFICIENCIA_MT_SAEB, - ID_LOCALIZACAO, -ID_DEPENDENCIA_ADM, - pop_estimada),
+                    PROFICIENCIA_LP ~ .)
+
+
+model_5serie_lp$r.squared
+
+```
+
+
+5 serie MT
+```{r}
+model_5serie_mt <- ranger(data = df_5serie %>% select(-PROFICIENCIA_LP_SAEB, - PROFICIENCIA_LP, - PROFICIENCIA_MT_SAEB, - ID_LOCALIZACAO, -ID_DEPENDENCIA_ADM, - pop_estimada),
+                    PROFICIENCIA_MT ~ .)
+
+
+model_5serie_mt$r.squared
+
+```
+
+
+
+9 serie LP
+```{r}
+model_9serie_lp <- ranger(data = df_9serie %>% select(-PROFICIENCIA_LP_SAEB, - PROFICIENCIA_MT, - PROFICIENCIA_MT_SAEB, - ID_LOCALIZACAO, -ID_DEPENDENCIA_ADM, - pop_estimada),
+                    PROFICIENCIA_LP ~ .)
+
+
+model_9serie_lp$r.squared
+
+```
+
+
+```{r}
+model_9serie_mt <- ranger(data = df_9serie %>% select(-PROFICIENCIA_LP_SAEB, - PROFICIENCIA_LP, - PROFICIENCIA_MT_SAEB, - ID_LOCALIZACAO, -ID_DEPENDENCIA_ADM, - pop_estimada),
+                    PROFICIENCIA_MT ~ .)
+
+
+model_9serie_mt$r.squared
+
+```
+

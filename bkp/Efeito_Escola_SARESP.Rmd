@@ -1,0 +1,335 @@
+---
+title: "Efeito_Escola_SARESP"
+author: "Livia Kobayashi"
+date: "09/04/2021"
+output: html_document
+---
+
+# Fontes
+https://dados.educacao.sp.gov.br/dataset/microdados-de-alunos-do-sistema-de-avalia%C3%A7%C3%A3o-de-rendimento-escolar-do-estado-de-s%C3%A3o-paulo
+https://dados.educacao.sp.gov.br/dicion%C3%A1rio-de-dados-microdados-de-alunos-do-saresp
+
+https://dados.educacao.sp.gov.br/dicionario-de-dados-do-questionario-saresp
+https://dados.educacao.sp.gov.br/dataset/question%C3%A1rios-saresp
+
+# Library
+```{r}
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(ranger)
+```
+
+# Import
+
+```{r}
+url <- "data/saresp/MICRODADOS_SARESP_2019.csv"
+ts_resultado_saresp <- read_csv2(url,na = "NULL")
+
+
+url <- "data/saresp/Questionario_alunos_2019.csv"
+ts_quest_alunos <- read_csv2(url,na = c("NULL","*",""))
+
+
+url <- "data/saresp/Questionario_pais_2019.csv"
+ts_quest_pais <- read_csv2(url,na =c("NULL","*",""))
+```
+
+```{r}
+ts_quest_alunos %>% 
+  count(Q01)
+```
+
+# Colnames
+```{r}
+colnames(ts_resultado_saresp)
+colnames(ts_quest_alunos)
+```
+
+# Head
+```{r}
+head(ts_resultado_saresp)
+head(ts_quest_alunos)
+```
+```{r}
+summary(ts_quest_alunos)
+```
+
+# Qtd.escolas
+```{r}
+ts_resultado_saresp %>% 
+  distinct(CODESC, NomeDepBol, SERIE) %>% 
+  group_by(NomeDepBol, SERIE) %>% 
+  count()
+```
+# alunos
+```{r}
+ts_resultado_saresp %>% 
+  group_by(NomeDepBol, SERIE) %>% 
+  count()
+```
+# Explore
+```{r}
+ts_resultado_saresp %>% 
+  count(CD_ALUNO) %>% 
+  filter(n > 1)
+```
+
+
+
+
+```{r}
+ts_resultado_saresp %>% 
+  count(NOMEDEP)
+
+ts_resultado_saresp %>% 
+  count(NomeDepBol)
+
+ts_resultado_saresp %>% 
+  count(TIPOCLASSE)
+```
+Regiao Metropolitana
+```{r}
+ts_resultado_saresp %>% 
+  count(RegiaoMetropolitana)
+```
+Validade
+```{r}
+ts_resultado_saresp %>% 
+  count(validade) %>% 
+  mutate(n/sum(n))
+```
+
+# Trata Resultados
+```{r}
+ts_resultado_saresp <- ts_resultado_saresp %>% 
+  filter(SERIE %in% c('5º Ano EF','9º Ano EF', 'EM-3ª série')) %>% 
+  transmute(cd_aluno = CD_ALUNO,
+            diretoria_ensino = DE,
+            regiao_metropolitana = RegiaoMetropolitana,
+            cod_municipio = CODMUN,
+            municipip = MUN,
+            cod_escola = CODESC,
+            serie = SERIE,
+            periodo = PERIODO,
+            tipo_classe = TIPOCLASSE,
+            fl_nec_esp = Tem_Nec,
+            particip_lp,
+            particip_mat,
+            pontos_lp = TOTAL_PONTO_LP,
+            pontos_mt = TOTAL_PONTO_MAT,
+            profic_lp,
+            profic_mat,
+            validade = VALIDADE)
+  
+  
+```
+
+# Trata Quest.alunos
+```{r}
+ts_quest_saresp %>% 
+  count(Q01)
+```
+
+
+```{r}
+ts_quest_alunos <- ts_quest_alunos %>% 
+  filter(SERIE %in% c('5º Ano EF','9º Ano EF','EM-3ª série'),
+         (!is.na(Q01) & !is.na(Q49))) %>% 
+  select(cd_aluno = CD_ALUNO,
+            dt_nasc = DT_NASCIMENTO,
+            cod_escola = CD_UE,
+            nm_escola = NOMESC,
+            starts_with("Q"))
+```
+
+```{r}
+perc_quest_aluno <-  ts_quest_alunos %>% 
+  select(starts_with("Q"))
+
+perc_quest_aluno[perc_quest_aluno == 'A'] <-'1'
+perc_quest_aluno[perc_quest_aluno == 'B'] <-'1'
+perc_quest_aluno[perc_quest_aluno == 'C'] <-'1'
+perc_quest_aluno[perc_quest_aluno == 'D'] <-'1'
+perc_quest_aluno[perc_quest_aluno == 'E'] <-'1'
+
+perc_quest_aluno <-  perc_quest_aluno %>% 
+  mutate_if(is.character, as.numeric) 
+
+
+perc_quest_aluno <- perc_quest_aluno %>% 
+  mutate(questoes_validas = rowSums(perc_quest_aluno[,1:49], na.rm = T),
+         validade_quest = if_else(questoes_validas/49 > 0.7, 1, 0) )
+
+perc_quest_aluno %>% 
+  count(validade_quest) %>% 
+  mutate(perc = n/sum(n))
+
+ts_quest_alunos$validade_quest <- perc_quest_aluno$validade_quest
+
+```
+
+# Trata Quest.pais
+```{r}
+ts_quest_saresp %>% 
+  count(Q01)
+```
+
+
+```{r}
+ts_quest_pais <- ts_quest_pais %>% 
+  filter(SERIE %in% c('5º Ano EF','9º Ano EF','EM-3ª série'),
+         (!is.na(Q01) & !is.na(Q49))) %>% 
+  select(cd_aluno = CD_ALUNO,
+            starts_with("Q")) %>% 
+  mutate()
+```
+
+```{r}
+perc_quest_pais <-  ts_quest_pais %>% 
+  select(starts_with("Q"))
+
+perc_quest_pais[perc_quest_pais == 'A'] <-'1'
+perc_quest_pais[perc_quest_pais == 'B'] <-'1'
+perc_quest_pais[perc_quest_pais == 'C'] <-'1'
+perc_quest_pais[perc_quest_pais == 'D'] <-'1'
+perc_quest_pais[perc_quest_pais == 'E'] <-'1'
+
+perc_quest_pais <-  perc_quest_pais %>% 
+  mutate_if(is.character, as.numeric) 
+
+
+perc_quest_pais <- perc_quest_pais %>% 
+  mutate(questoes_validas = rowSums(perc_quest_pais[,1:49], na.rm = T),
+         validade_quest_pais = if_else(questoes_validas/49 > 0.7, 1, 0) )
+
+
+ts_quest_pais$validade_quest_pais <- perc_quest_pais$validade_quest_pais
+
+colnames(ts_quest_pais) <- paste(colnames(ts_quest_pais), "pais", sep = "_")
+```
+
+
+# Cria data
+```{r}
+data <- ts_resultado_saresp %>% 
+  inner_join(ts_quest_alunos, by = "cd_aluno") %>% 
+  left_join(ts_quest_pais, by = c("cd_aluno" = "cd_aluno_pais")) %>% 
+  filter(validade == 1,
+         validade_quest == 1) %>% 
+  
+  
+```
+
+# Regressao univariada
+
+## 5 Serie
+```{r}
+df_5serie <- ts_resultado_saresp %>% 
+  filter(validade == 1,
+         serie == '5º Ano EF') %>% 
+  inner_join(ts_quest_alunos, by = "cd_aluno") %>% 
+  filter(validade_quest == 1) %>% 
+  select(cd_aluno,
+         profic_lp,
+         profic_mat,
+         Q01:Q49) %>% 
+  mutate_if(is.character, as.factor)
+```
+
+```{r}
+vars_5serie <- colnames(df_5serie)
+vars_5serie <- vars_5serie[4:length(vars_5serie)]
+vars_5serie
+```
+
+```{r}
+y_resp <- "profic_lp"
+
+tb_r2_5serie <- data.frame(var = vars_5serie)
+
+rsquared <- c()
+for (variable in vars_5serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_5serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$LP <- rsquared
+
+tb_r2_5serie %>% arrange(desc(LP)) %>% head()
+```
+```{r}
+y_resp <- "profic_mat"
+
+
+rsquared <- c()
+for (variable in vars_5serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_5serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$MT <- rsquared
+
+tb_r2_5serie %>% arrange(desc(MT)) %>% head()
+```
+## 9 Serie
+```{r}
+df_9serie <- ts_resultado_saresp %>% 
+  filter(validade == 1,
+         serie == '9º Ano EF') %>% 
+  inner_join(ts_quest_alunos, by = "cd_aluno") %>% 
+  filter(validade_quest == 1) %>% 
+  select(cd_aluno,
+         profic_lp,
+         profic_mat,
+         Q01:Q49) %>% 
+  mutate_if(is.character, as.factor)
+```
+
+```{r}
+vars_9serie <- colnames(df_9serie)
+vars_9serie <- vars_5serie[4:length(vars_9serie)]
+vars_9serie
+```
+
+```{r}
+y_resp <- "profic_lp"
+
+tb_r2_9serie <- data.frame(var = vars_9serie)
+
+rsquared <- c()
+for (variable in vars_9serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_9serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$LP <- rsquared
+
+tb_r2_5serie %>% arrange(desc(LP)) %>% head()
+```
+```{r}
+y_resp <- "profic_mat"
+
+
+rsquared <- c()
+for (variable in vars_5serie) {
+  
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df_5serie)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+
+tb_r2_5serie$MT <- rsquared
+
+tb_r2_5serie %>% arrange(desc(MT)) %>% head()
+```

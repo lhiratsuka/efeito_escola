@@ -39,24 +39,25 @@ saresp_mode <- saresp_pais_trata %>%
   group_by(id_escola,serie) %>% 
   summarise_if(is.character, mode) %>% 
   arrange(cd_ue) %>% 
-  rename_with(~gsub("q", "mode_pais_q", .x, fixed = TRUE))
+  rename_with(~gsub("q", "mode_pais_q", .x, fixed = TRUE)) %>% 
+  rename_at(vars(-id_escola,-serie), ~paste0(., "_spp"))
 
-saresp_mode %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
+# saresp_mode %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
 
-saresp_mode_collapse <- saresp_mode %>% 
-  mutate(mode_pais_q19e20 = case_when(
-                                      mode_pais_q19e20 == "DD" ~ 'DD',
-                                      mode_pais_q19e20 == "BB" ~ 'BB',
-                                      mode_pais_q19e20 == "CC" ~'CC',
-                                      mode_pais_q19e20 == "AA" ~'AA',
-                                      str_detect(mode_pais_q19e20,"E|F") ~'E+',
-                                      TRUE ~'Outros'
-                                         ))
+# saresp_mode_collapse <- saresp_mode %>% 
+#   mutate(mode_pais_q19e20 = case_when(
+#                                       mode_pais_q19e20 == "DD" ~ 'DD',
+#                                       mode_pais_q19e20 == "BB" ~ 'BB',
+#                                       mode_pais_q19e20 == "CC" ~'CC',
+#                                       mode_pais_q19e20 == "AA" ~'AA',
+#                                       str_detect(mode_pais_q19e20,"E|F") ~'E+',
+#                                       TRUE ~'Outros'
+#                                          ))
 
-saresp_mode_collapse %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
-saresp5ef_mode <- saresp_mode_collapse %>% filter(serie == '5º Ano EF')
-saresp9ef_mode <- saresp_mode_collapse %>% filter(serie == '9º Ano EF')
-saresp3em_mode <- saresp_mode_collapse %>% filter(serie == 'EM-3ª série')
+# saresp_mode_collapse %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
+saresp5ef_mode <- saresp_mode %>% filter(serie == '5º Ano EF')
+saresp9ef_mode <- saresp_mode %>% filter(serie == '9º Ano EF')
+saresp3em_mode <- saresp_mode %>% filter(serie == 'EM-3ª série')
 
 
 

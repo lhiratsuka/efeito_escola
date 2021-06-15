@@ -1,0 +1,171 @@
+---
+title: "Análise das variáveis Saeb - moda por escola"
+subtitle: "Série `r params$serie`"
+author: "Livia Kobayashi"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  pdf_document: default
+params: 
+  serie: '3EM'
+  book: "../output/books/saeb3em_mode.csv"  
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+library(tidyverse)
+library(DataExplorer)
+library(gridExtra)
+library(grid)
+library(caret)
+library(ggcorrplot)
+library(vcd)
+```
+
+```{r echo=TRUE,message=FALSE,warning=FALSE}
+
+df_publico <- read.csv2("../output/books/df_publico.csv")
+
+book <- read.csv2(params$book)
+```
+
+
+```{r echo=FALSE}
+
+pub <- df_publico %>% filter(id_serie == params$serie)
+df <- pub %>% 
+  filter(id_dependencia_adm == 'Estadual') %>% 
+  filter(fl_mascara == 0) %>% 
+  select(id_escola,
+         nivel_socio_economico,
+         nu_matriculados_censo,
+         media) %>% 
+  left_join(book, by = "id_escola")
+
+select_data <- df %>% select(id_escola, media, nivel_socio_economico, matches("q\\d+"))
+
+final_data <- select_data[rowSums(is.na(select_data[ , 3:ncol(select_data)])) == 0, ]
+
+
+pub %>% select(id_serie) %>% head(1)
+```
+# Missing
+Base 100% preenchida
+```{r}
+plot_missing(df)
+```
+
+# Volume
+## Variáveis com baixa variância:
+- mode_q001_sb        - mode_q003a_sb           - mode_q003b_sb           - mode_q003c_sb\
+- mode_q003d_sb       - mode_q003e_sb           - mode_q004_sb            - mode_q006b_sb\
+- mode_q006c_sb       - mode_q006d_sb           - mode_q007_sb            - mode_q008a_sb\
+- mode_q008b_sb       - mode_q008c_sb           - mode_q009a_sb           - mode_q009b_sb\
+- mode_q009f_sb       - mode_q010b_sb           - mode_q010e_sb           - mode_q010f_sb\
+- mode_q010h_sb       - mode_q010i_sb           - mode_q011_sb            - mode_q014_sb\
+- mode_q016_sb        - mode_q017a_sb           - mode_q017b_sb           - mode_q018a_sb\
+- mode_q018c_sb       - mode_q004_f_sb          - mode_q005_f_sb\
+
+```{r,out.height = "200%", out.width="100%"}
+plot_bar(final_data)
+```
+# Médias das notas x variáveis
+## Variáveis que discriminam e tem volume:
+* mode_q002_sb: Maioria branca => notas maiores
+* mode_q005_sb: pai com ensino superior => notas maiores e os que não sabem a escolarida do pai => notas menores
+* mode_q006a_sb: Os pais conversarem sobre a escola => notas >
+* mode_q009c_sb: Ter computador => notas >
+* mode_q009g_sb: Ter Carro => Notas >
+* mode_q010c_sb: Ter um quarto só para si => notas >
+* mode_q010d_sb: Ter escrivaninha => Notas >
+* mode_q010g_sb: Ter aspirador => Notas >
+* mode_q012_sb: Vai de carro/outros para escola => nots maiores
+  + a.À pé.                      
+  + b.De ônibus urbano.          
+  + c.De transporte escolar.     
+  + d.De barco.                     
+  + e.De bicicleta.              
+  + f.De carro                   
+  + g.Outros meios de transporte.
+* mode_q017c_sb: menos tempo gasto em tarefas domésticas => notas > 
+* mode_q017d_sb: Não usar!!!
+* mode_q018b_sb: Leitura extraescolar => notas >
+```{r}
+vars <- colnames(final_data)
+vars <- vars[-c(1,2)]
+plots <- list()
+i <- 1
+for (variable in vars) {
+  #plots[[i]] <- plot_boxplot(final_data, by = variable)
+  plots[[i]] <- ggplot(final_data, aes_string(variable, "media")) + geom_boxplot()
+  i <- i + 1
+}
+
+n <- length(plots)
+
+i <- 1
+while (i <= n) {
+  do.call("grid.arrange", c(plots[i:(min(i+5, n))], ncol=3, nrow = 2))
+  i <- i + 6
+}
+
+
+```
+
+
+
+# Análise Univariada
+### Variáves mais significativas
+* **mode_q012_sb:**
+Considerando a maior distância percorrida, normalmente de que forma você chega à sua escola?
+* **mode_q010d_sb:**
+Na sua casa tem: - Mesa para estudar (ou escrivaninha).
+* **mode_q010g_sb:**
+Na sua casa tem: - Aspirador de pó.
+* **mode_q005_sb:**
+Qual é a maior escolaridade de seu pai (ou homem responsável por você)?
+* **mode_q002_sb:**
+Qual é a sua cor ou raça?
+```{r}
+
+vars <- colnames(final_data)
+vars <- vars[-c(1,2)]
+y_resp <- "media"
+
+remove_cols <- nearZeroVar(df, names = TRUE)
+final_cols <- setdiff(vars, remove_cols)
+final_cols
+tb_r2 <- data.frame(var = final_cols)
+
+rsquared <- c()
+for (variable in final_cols) {
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+tb_r2$rsquared <- rsquared
+tb_r2 %>% head(nrow(tb_r2))
+
+```
+```{r include=FALSE}
+data_corr <- df[,final_cols]
+
+model.matrix(~0+., data=data_corr) %>% 
+  cor(use="pairwise.complete.obs") %>% 
+  ggcorrplot(show.diag = F, type="lower", lab=TRUE, lab_size=2, show.legend = F)
+```
+
+
+# MAtriz de correlação
+Sem variáveis correlacionadas (> 50%)\
+Com exceção da variávei de formação do pai transformada
+
+```{r fig.height=12, fig.width=14}
+
+catcorrm <- function(vars, dat) sapply(vars, function(y) sapply(vars, function(x) assocstats(table(dat[,x],dat[,y]))$cramer))
+
+matriz <- catcorrm(final_cols, data_corr)
+
+ggcorrplot(matriz, show.diag = F, type="lower", lab=TRUE, lab_size=6, show.legend = F)
+```
+

@@ -1,0 +1,102 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+```
+
+
+# Import
+Base de público, Questionário Saeb 2019, Questionário Saresp Pais 2019
+O Questionário Saresp Alunos 2019 não será utilizado devido à baixa importância das variáveis calculada durante a análise.
+```{r}
+#Publico
+df_publico <- read.csv2("output/books/df_publico.csv")
+#Saeb
+saeb <- read.csv2("output/books/saeb5ef_mode.csv")
+#Saresp Pais
+saresp <- read.csv2("output/books/saresp5ef_pais_mode.csv")
+```
+
+# Base de público
+```{r}
+df_publico <- df_publico %>% 
+  filter(id_serie == '5EF') %>% 
+  select(-c(tp_situacao_funcionamento,in_comum_medio_integrado,ano_implantacao,tipo_ensino))
+
+glimpse(df_publico)
+```
+
+```{r}
+head(df_publico)
+```
+
+# BAse do Saeb
+
+## Filtra escolas estaduais da série
+```{r}
+saeb_filter <- saeb %>% 
+  filter(id_escola %in% df_publico$id_escola)
+```
+
+
+## Remove variáveis com zero ou baixa variância
+
+Colunas removidas
+```{r}
+remove_cols <- nearZeroVar(saeb_filter, names = TRUE)
+remove_cols 
+```
+
+Colunas finais
+```{r}
+total_vars <- colnames(saeb)
+final_cols <- setdiff(total_vars, remove_cols)
+final_cols
+```
+
+Base final Saeb
+```{r}
+saeb_final <- saeb_filter[, final_cols]
+head(saeb_final)
+```
+
+
+# Análise Univariada
+
+## Cruza com
+```{r}
+saeb_modelo <- df_publico %>% 
+  select(id_escola,
+         media,
+         nivel_socio_economico) %>% 
+  left_join(saeb_final, by = "id_escola")
+```
+
+Parâmetros da regressão univariada
+```{r}
+y_resp <- "media"
+vars_modelo <- colnames(saeb_modelo)[-c(1,2)]
+vars_modelo
+
+tb_r2 <- data.frame(var = vars_modelo)
+tb_r2
+rsquared <- c()
+```
+
+
+Looping de regressão linear
+```{r}
+for (variable in vars_modelo) {
+lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+model_lm <- lm(lm_formula, saeb_modelo)
+rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+tb_r2$rsquared <- rsquared
+tb_r2 %>% arrange(desc(rsquared))
+```
+

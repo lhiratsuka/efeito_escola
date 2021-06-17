@@ -24,8 +24,7 @@ saresp_pais_trata <- saresp_pais %>%
          #cd_mun,
          #nm_mun,
          #serie,
-         q12,
-         q18:q50) %>% 
+         q19:q50) %>% 
   mutate(q19e20 = paste0(q19,q20)) %>% 
   arrange(id_escola)
 
@@ -44,20 +43,20 @@ saresp_mode <- saresp_pais_trata %>%
 
 # saresp_mode %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
 
-# saresp_mode_collapse <- saresp_mode %>% 
-#   mutate(mode_pais_q19e20 = case_when(
-#                                       mode_pais_q19e20 == "DD" ~ 'DD',
-#                                       mode_pais_q19e20 == "BB" ~ 'BB',
-#                                       mode_pais_q19e20 == "CC" ~'CC',
-#                                       mode_pais_q19e20 == "AA" ~'AA',
-#                                       str_detect(mode_pais_q19e20,"E|F") ~'E+',
-#                                       TRUE ~'Outros'
-#                                          ))
+saresp_mode_collapse <- saresp_mode %>%
+  mutate(mode_pais_q19e20_spp = case_when(
+                                      mode_pais_q19e20_spp == "DD" ~ 'DD',
+                                      mode_pais_q19e20_spp == "BB" ~ 'BB',
+                                      mode_pais_q19e20_spp == "CC" ~'CC',
+                                      mode_pais_q19e20_spp == "AA" ~'AA',
+                                      str_detect(mode_pais_q19e20_spp,"E|F") ~'E+',
+                                      TRUE ~'Outros'
+                                         ))
 
 # saresp_mode_collapse %>% group_by(mode_pais_q19e20) %>% summarise(n = n()/nrow(saresp_mode)) %>% arrange(desc(n))
-saresp5ef_mode <- saresp_mode %>% filter(serie == '5º Ano EF')
-saresp9ef_mode <- saresp_mode %>% filter(serie == '9º Ano EF')
-saresp3em_mode <- saresp_mode %>% filter(serie == 'EM-3ª série')
+saresp5ef_mode <- saresp_mode_collapse %>% filter(serie == '5º Ano EF')
+saresp9ef_mode <- saresp_mode_collapse %>% filter(serie == '9º Ano EF')
+saresp3em_mode <- saresp_mode_collapse %>% filter(serie == 'EM-3ª série')
 
 
 

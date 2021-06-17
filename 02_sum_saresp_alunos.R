@@ -27,8 +27,8 @@ saresp_alunos_trata <- saresp_alunos %>%
          #cd_mun,
          #nm_mun,
          #serie,
-         q11:q12,
-         q14:q21)
+         q16,
+         q19:q21)
   
   
 #saresp_5EF <- saresp_5EF %>% mutate_at(vars(q01:q49), ~replace(., is.na(.), ".")
@@ -37,7 +37,8 @@ saresp_mode <- saresp_alunos_trata %>%
   group_by(id_escola,serie) %>% 
   summarise_if(is.character, mode) %>% 
   arrange(cd_ue) %>% 
-  rename_with(~gsub("q", "mode_q", .x, fixed = TRUE))
+  rename_with(~gsub("q", "mode_q", .x, fixed = TRUE)) %>% 
+  rename_at(vars(-id_escola,-serie), ~paste0(., "_spa"))
 
 
 saresp5ef_mode <- saresp_mode %>% filter(serie == '5º Ano EF')

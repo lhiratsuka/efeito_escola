@@ -16,11 +16,13 @@ mode_data <- function(data) {
            IN_PREENCHIMENTO_LP == 1|| IN_PREENCHIMENTO_MT == 1,
            IN_PREENCHIMENTO_QUESTIONARIO == 1) %>% 
     select(ID_ESCOLA,
+           ID_DEPENDENCIA_ADM,
            ID_ALUNO,
-           TX_RESP_Q001:TX_RESP_Q006D,
+           TX_RESP_Q001:TX_RESP_Q005,
            TX_RESP_Q007:TX_RESP_Q012,
-           TX_RESP_Q014,
-           TX_RESP_Q016:TX_RESP_Q018C)
+           TX_RESP_Q017A:TX_RESP_Q017C,
+           TX_RESP_Q017E:TX_RESP_Q018C
+           )
 
   
   data_mode <- data %>% 
@@ -59,4 +61,6 @@ saeb5ef_mode <- mode_data(saeb_5ef)
 saeb9ef_mode <- mode_data(saeb_9ef)
 saeb3em_mode <- mode_data(saeb_3em)
 
-
+write.csv2(saeb5ef_mode,"output/books/saeb5ef_mode.csv", row.names = FALSE, na = "")
+write.csv2(saeb9ef_mode, "output/books/saeb9ef_mode.csv", row.names = FALSE, na = "")
+write.csv2(saeb3em_mode, "output/books/saeb3em_mode.csv", row.names = FALSE, na = "")

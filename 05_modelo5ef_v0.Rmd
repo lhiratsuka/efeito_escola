@@ -1,0 +1,374 @@
+---
+title: "Modelo v0 - book saeb"
+output: html_notebook
+---
+
+# Import
+```{r packages, warning=FALSE,error=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(timereg)
+library(MLmetrics)
+options(scipen = 999)
+set.seed(231192)
+```
+
+Importa base do saeb com variáveis pré selecionadas
+```{r saeb}
+saeb <- read.csv2("output/v0/base_v0_5ef.csv", na = "")
+head(saeb)
+```
+
+# Checa NA
+Há NA no Saeb pq há escolas em que a maioria dos alunos responde NA => pode usar como NA
+Os casos de NA no Saresp podem ser as escolas que participaram do Saeb, mas não do Saresp, o que é necessário tratar caso isso esteja discriminando no modelo
+```{r colsums}
+colSums(is.na(saeb))
+```
+
+# Exclui variáveis do Saresp
+```{r}
+saeb <- saeb %>% select(-ends_with('spp'))
+names(saeb)
+```
+
+# Adiciona variáveis do IPVS
+```{r import ipvs}
+ipvs <- read.csv2("output/books/ipvs5ef.csv")
+head(ipvs)
+```
+
+```{r cruza saeb e ipvs}
+cruza_ipvs <- saeb %>% 
+  left_join(ipvs, by = c("co_distrito", "id_serie"))
+head(cruza_ipvs)
+```
+
+
+# Adiciona variáveis do Seade
+```{r import seade}
+seade <- read.csv2("output/books/seade5ef.csv")
+head(seade)
+```
+
+```{r cruza com seade}
+cruza_seade <- cruza_ipvs %>% 
+  left_join(seade, by = c("id_municipio", "id_serie"))
+head(cruza_seade)
+```
+
+```{r checa NA pós cruzamentos}
+colSums(is.na(cruza_seade))
+```
+
+
+
+# Cria base do modelo
+Exclui variáveis do df_publico
+converte questões para fator e adiciona coluna de id_serie
+```{r trata saeb}
+df <- cruza_seade %>% 
+    select(#id_serie,
+           id_escola,
+           #fl_mascara,
+           #tipo_publico,
+           media,
+           nivel_socio_economico,
+           ends_with("sb"),
+           ends_with("ipvs"),
+           ends_with("imp")
+           ) %>% 
+    mutate_if(is.character, ~replace(., is.na(.), "NA")) %>% 
+    mutate_if(is.character, as.factor)
+
+summary(df)
+
+```
+
+
+
+# CV
+
+```{r createfolds}
+set.seed(231192)
+myFolds <- createFolds(df$media, k = 5)
+trControl <- trainControl(
+  method = "cv",
+  number = 5,
+  index = myFolds
+)
+
+results <- data.frame(fold = c('Fold 1', 'Fold 2', 'Fold 3', 'Fold 4', 'Fold 5'))
+results
+```
+
+
+# Models
+
+## Ranger
+Random forest básico com saeb + ipvs + seade: 0.4199688 (oob) e 0.4508101 (meanFolds)
+```{r ranger todas variaveis}
+set.seed(231192)
+model_ranger <- train(media ~.,
+                        data = df %>% select(-id_escola),
+                        method = "ranger",
+                        metric = "Rsquared",
+                        importance = 'permutation',
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+model_ranger$finalModel$r.squared
+results
+mean(results$rf)
+```
+Predict ranger1: 0.5163253
+```{r predict ranger 1}
+df$pred_ranger1 <- predict(model_ranger, df, type = "raw")
+R2_Score(df$pred_ranger1,df$media)
+```
+
+VAriable importance
+```{r iv ranger}
+iv <- data.frame(importance = model_ranger$finalModel$variable.importance)
+iv %>% arrange(desc(importance)) %>%  head(15)
+```
+
+# Trata principais variáveis
+```{r funcao resumo}
+resumo <- function(data, var) {
+  data %>% 
+    group_by({{ var }}) %>% 
+  summarise(n = n(),
+            nota = mean(media)) %>% 
+  arrange(nota)
+}
+```
+
+## 1.Nivel_socioeconomico
+```{r summary nivel}
+resumo(df,nivel_socio_economico)
+
+df <- df %>% 
+  mutate(nivel_socio_economico = as.character(nivel_socio_economico),
+        nivel_socio_economico = 
+               case_when(nivel_socio_economico == 'Nível III' ~ 'Nível IV',
+                         nivel_socio_economico == 'Nível VII' ~ 'Nível VI',
+                         TRUE ~ nivel_socio_economico),
+        nivel_socio_economico = as.factor(nivel_socio_economico)
+        )
+
+resumo(df,nivel_socio_economico)
+```
+
+## 2.Mode_q010g_sb (aspirador)
+```{r}
+resumo(df, mode_q010g_sb)
+df <- df %>% 
+  mutate(mode_q010g_sb = as.character(mode_q010g_sb),
+        mode_q010g_sb = 
+               case_when(mode_q010g_sb == 'NA' ~ 'A',
+                         TRUE ~ mode_q010g_sb),
+        mode_q010g_sb = as.factor(mode_q010g_sb)
+        )
+
+resumo(df, mode_q010g_sb)
+```
+
+## 3.Mode_q009c_sb (computador)
+
+```{r}
+resumo(df, mode_q009c_sb)
+
+df <- df %>% 
+  mutate(mode_q009c_sb = as.character(mode_q009c_sb),
+        mode_q009c_sb = 
+               case_when(mode_q009c_sb %in% c('NA','A') ~ 'A',
+                         TRUE ~ 'B'),
+        mode_q009c_sb = as.factor(mode_q009c_sb)
+        )
+
+resumo(df, mode_q009c_sb)
+```
+## 4.mode_q012_sb (Percurso escola)
+
+```{r}
+resumo(df, mode_q012_sb)
+
+df <- df %>% 
+  mutate(mode_q012_sb = as.character(mode_q012_sb),
+        mode_q012_sb = 
+               case_when(mode_q012_sb %in% c('NA','B','C','E') ~ 'BE',
+                         TRUE ~ mode_q012_sb),
+        mode_q012_sb = as.factor(mode_q012_sb)
+        )
+
+resumo(df, mode_q012_sb)
+```
+## 5.mode_q009g_sb (Carro)
+
+```{r}
+resumo(df, mode_q009g_sb)
+
+df <- df %>% 
+  mutate(mode_q009g_sb = as.character(mode_q009g_sb),
+        mode_q009g_sb = 
+               case_when(mode_q009g_sb %in% c('NA','A') ~ 'A',
+                         TRUE ~ 'B'),
+        mode_q009g_sb = as.factor(mode_q009g_sb)
+        )
+
+resumo(df, mode_q009g_sb)
+```
+## 6.mode_q005_f_sb (Formação pai)
+```{r }
+resumo(df, mode_q005_f_sb)
+
+df <- df %>% 
+  mutate(mode_q005_f_sb = as.character(mode_q005_f_sb),
+        mode_q005_f_sb = 
+               case_when(mode_q005_f_sb %in% c('NA','A','B','C') ~ 'AC',
+                         TRUE ~ mode_q005_f_sb),
+        mode_q005_f_sb = as.factor(mode_q005_f_sb)
+        )
+
+resumo(df, mode_q005_f_sb)
+```
+
+## 7.mode_q010d_sb (Escrivaninha)
+```{r }
+resumo(df, mode_q010d_sb)
+
+df <- df %>% 
+  mutate(mode_q010d_sb = as.character(mode_q010d_sb),
+        mode_q010d_sb = 
+               case_when(mode_q010d_sb %in% c('NA','A') ~ 'A',
+                         TRUE ~ mode_q010d_sb),
+        mode_q010d_sb = as.factor(mode_q010d_sb)
+        )
+
+resumo(df, mode_q010d_sb)
+```
+## 8.mode_q004_f_sb
+```{r }
+resumo(df, mode_q004_f_sb)
+
+df <- df %>% 
+  mutate(mode_q004_f_sb = as.character(mode_q004_f_sb),
+        mode_q004_f_sb = 
+               case_when(mode_q004_f_sb %in% c('A','B','C') ~ 'AC',
+                         TRUE ~ mode_q004_f_sb),
+        mode_q004_f_sb = as.factor(mode_q004_f_sb)
+        )
+
+resumo(df, mode_q004_f_sb)
+```
+
+## 09.ipvs567_ipvs
+```{r}
+ggplot(df, aes(ipvs567_ipvs,media)) + geom_point() 
+```
+## 09.ipvs567_ipvs
+```{r}
+ggplot(df, aes(sqrt(rendimento_medio_2019_imp),media)) + geom_point()
+```
+# Testes de modelo
+## Random forest básico com saeb + ipvs + seade: 0.4199688 (oob) e 0.4508101 (meanFolds)
+### Random forest básico com 
+1. nivel_socioeconomico: 0.3441922 (oob) e 0.3451548 (fold)
+2. mode_q010g_sb (aspirador): 0.3750296 e 0.3731535
+3. mode_q009c_sb (computador): 0.3850455 e 0.3806649
+4. mode_q012_sb (percurso): 0.4153582 e 0.4052983
+5. mode_q009g_sb(carro): 0.419728 e 0.4064757
+6. mode_q005_f_sb: 0.4264405 e 0.4176282
+0. mode_q010d_sb: 0.4281651 e 0.4165104 (não usar)
+0. mode_q004_f_sb: 0.4256851 e 0.4148484 (não usar)
+7. ipvs567_ipvs: 0.4466716 e 0.430546 (tanto faz escalar)
+0. v27_ipvs: 0.4446033 e 0.4331612 (não usar tanto faz escalar)
+9. rendimento_medio_2019_imp: 0.4531669 e 0.4357195 (tanto faz escalar)
+0. ind_envelhecimento_2019_imp: 0.4444611 e 0.4307334
+```{r ranger}
+set.seed(231192)
+model_ranger2 <- train(media ~ nivel_socio_economico + mode_q010g_sb + mode_q009c_sb + mode_q012_sb + mode_q009g_sb + mode_q005_f_sb + ipvs567_ipvs + rendimento_medio_2019_imp,
+                        data = df %>% select(-id_escola),
+                        method = "ranger",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+model_ranger2$finalModel$r.squared
+mean(model_ranger2$resample$Rsquare)
+```
+```{r predic ranger2}
+df$pred_ranger2 <- predict(model_ranger2, df, type = "raw")
+R2_Score(df$pred_ranger2,df$media)
+```
+
+```{r lm}
+set.seed(231192)
+model_lm <- train(media ~ nivel_socio_economico + mode_q010g_sb + mode_q009c_sb + mode_q012_sb + mode_q009g_sb + mode_q005_f_sb + ipvs567_ipvs + rendimento_medio_2019_imp,
+                        data = df %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+mean(model_lm$resample$Rsquare)
+
+df$pred_lm <- predict(model_lm, df, type = "raw")
+R2_Score(df$pred_lm,df$media)
+```
+
+```{r xgb, warning=FALSE}
+set.seed(231192)
+model_xgb <- train(media ~ nivel_socio_economico + mode_q010g_sb + mode_q009c_sb + mode_q012_sb + mode_q009g_sb + mode_q005_f_sb + ipvs567_ipvs + rendimento_medio_2019_imp,
+                        data = df %>% select(-id_escola),
+                        method = "xgbTree",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+
+df$pred_xgb <- predict(model_xgb, df, type = "raw")
+mean(model_xgb$resample$Rsquare)
+R2_Score(df$pred_xgb,df$media)
+```
+# Predict -----
+```{r}
+df_predict <- df %>% 
+  transmute(
+    id_escola,
+    nivel_socio_economico,
+    mode_q010g_sb,
+    mode_q009c_sb,
+    mode_q012_sb,
+    mode_q009g_sb,
+    mode_q005_f_sb,
+    ipvs567_ipvs,
+    rendimento_medio_2019_imp,
+    media,
+    nota_estimada = pred_ranger2,
+    diff = round(media - nota_estimada))
+
+head(df_predict)
+```
+
+```{r}
+ranking <- df_predict %>% 
+  arrange(desc(media)) %>% 
+  mutate(ranking_nota = row_number()) %>% 
+  arrange(desc(diff)) %>% 
+  mutate(ranking_iee = row_number(),
+         diff_ranking = ranking_nota - ranking_iee,
+         grupo_ranking_nota = factor(qcut(ranking_nota), labels = c('G1','G2','G3','G4')),
+         grupo_ranking_iee = factor(qcut(ranking_iee), labels = c('G1','G2','G3','G4')))
+
+head(ranking)
+``` 
+
+# IEE
+```{r}
+
+table(ranking$grupo_ranking_nota, ranking$grupo_ranking_iee)
+
+write.csv2(ranking, "output/v0/ranking5ef.csv", row.names = FALSE, na = "")
+```

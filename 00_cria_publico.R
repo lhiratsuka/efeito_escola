@@ -91,7 +91,8 @@ censo <- censo %>% filter(CO_UF == 35) %>%
     CO_ENTIDADE,
     NO_ENTIDADE,
     TP_SITUACAO_FUNCIONAMENTO,
-    IN_COMUM_MEDIO_INTEGRADO
+    IN_COMUM_MEDIO_INTEGRADO,
+    CO_DISTRITO
   )
 
 municipios <- municipios %>% 
@@ -131,7 +132,12 @@ df_publico <- df_publico %>%
     TRUE ~ "Tradicional"
   ),
   tipo_publico = if_else(ano_implantacao > 2019 & !is.na(ano_implantacao), "Tradicional",tipo_ensino)) %>% 
-  select(- pei, - eti)
+  select(- pei, 
+         - eti,
+         -TP_SITUACAO_FUNCIONAMENTO,
+         -IN_COMUM_MEDIO_INTEGRADO,
+         - ano_implantacao,
+         -tipo_ensino)
        
 colnames(df_publico) <- tolower(colnames(df_publico))
 

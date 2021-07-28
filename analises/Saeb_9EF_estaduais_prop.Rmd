@@ -1,0 +1,97 @@
+---
+title: "Análise das variáveis Saeb - moda por escola"
+subtitle: "Série `r params$serie`"
+author: "Livia Kobayashi"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  pdf_document: default
+params: 
+  serie: '9EF'
+  book: "../output/books/saeb9ef_prop.csv"  
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+library(tidyverse)
+library(DataExplorer)
+library(gridExtra)
+library(grid)
+library(caret)
+library(corrplot)
+library(vcd)
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+
+df_publico <- read.csv2("../output/books/df_publico.csv")
+
+book <- read.csv2(params$book)
+```
+
+
+```{r echo=FALSE}
+
+pub <- df_publico %>% filter(id_serie == params$serie)
+df <- pub %>% 
+  filter(id_dependencia_adm == 'Estadual') %>% 
+  select(id_escola,
+         media) %>% 
+  left_join(book, by = "id_escola")
+
+
+```
+# Missing
+Base 100% preenchida
+```{r}
+plot_intro(df)
+
+```
+
+# Distribuição
+
+```{r,out.height = "200%", out.width="100%"}
+plot_histogram(df)
+```
+# Gráfico de dispersão
+```{r}
+plot_scatterplot(df[,2:ncol(df)], by = "media", sampled_rows = 1000L)
+```
+# Análise Univariada
+```{r}
+vars <- colnames(df)
+vars <- vars[-c(1,2)]
+y_resp <- "media"
+
+remove_cols <- nearZeroVar(df, names = TRUE)
+final_cols <- setdiff(vars, remove_cols)
+
+tb_r2 <- data.frame(var = final_cols)
+
+rsquared <- c()
+for (variable in final_cols) {
+  lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+  model_lm <- lm(lm_formula, df)
+  rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+
+tb_r2$rsquared <- rsquared
+tb_r2 %>% arrange(desc(rsquared)) %>% head(10)
+
+```
+```{r top20 var}
+top_20 <- tb_r2 %>% arrange(desc(rsquared)) %>% top_n(20) %>% arrange(var)
+var_saeb_selec <- top_20$var
+```
+```{r base top20}
+df_top20 <- df[,var_saeb_selec]
+```
+
+# Correlação
+```{r}
+res <- cor(df_top20)
+#round(res, 2)
+corrplot(res, type = "upper", method = "number", number.cex=0.7)
+
+```
+* 4 com 5
+* 9g:  10g

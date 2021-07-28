@@ -1,0 +1,312 @@
+---
+title: "R Notebook"
+output: html_notebook
+params:
+  serie: '5ef'
+---
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(rpart)
+library(rpart.plot)
+
+```
+
+# Modelo v1: 0,56
+```{r modelo v1}
+url <- paste0("output/v1/ranking", params$serie, ".csv")
+df <- read.csv2(url, na = "") 
+df <- df %>% 
+  select(id_escola:media)
+head(df)
+```
+## Nivel_socioeconomico
+```{r var1}
+df <- df %>% 
+  mutate(nivel_socio_economico = as.character(nivel_socio_economico),
+        nivel_socio_economico = 
+               factor(case_when(
+                 nivel_socio_economico %in% c('Nível III') ~ 'Nível IV',
+                 nivel_socio_economico %in% c('Nível VII') ~ 'Nível VI',
+                         TRUE ~ nivel_socio_economico)))
+```
+
+# CV
+```{r createfolds}
+set.seed(231192)
+myFolds <- createFolds(df$media, k = 5)
+trControl <- trainControl(
+  method = "cv",
+  number = 5,
+  index = myFolds
+)
+
+results <- data.frame(fold = c('Fold 1', 'Fold 2', 'Fold 3', 'Fold 4', 'Fold 5'))
+results
+```
+# INSE Saresp: 0.56
+```{r import inse}
+inse <- read_csv2("data/saresp/INSE_Geral 2018_1_0.csv")
+colnames(inse) <- c("codesc","nome","dir","mun","inse")
+inse <- inse %>% 
+  transmute(id_escola = as.integer(paste0("35",str_pad(codesc,6,pad = "0"))),
+            inse)
+head(inse)
+```
+
+```{r cruza inse}
+teste <- df %>% 
+  left_join(inse, by = "id_escola")
+summary(teste$inse)
+teste %>% group_by(nivel_socio_economico) %>% summarise(inse = mean(inse, na.rm = T))
+```
+
+```{r input inse}
+teste <- teste %>% 
+  #mutate(inse = replace_na(inse, mean(inse, na.rm = T)))
+  group_by(nivel_socio_economico) %>%
+    mutate(
+        inse = replace_na(inse, mean(inse, na.rm = T))
+    ) %>% 
+  ungroup()
+summary(teste$inse)
+teste %>% group_by(nivel_socio_economico) %>% summarise(inse = mean(inse, na.rm = T))
+```
+```{r lm inse}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + tx_resp_q010g_B + tx_resp_q010e_B + I(tx_resp_q010b_B^2) + tx_resp_q010h_B + tx_resp_q012_A+ tx_resp_q009g_B + tx_resp_q003a_B + tx_resp_q017e_A + tx_resp_q004_E + tx_resp_q002_A + ipvs567_ipvs + inse,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+results
+mean(results$rf)
+```
+
+# Saresp: 0.57 (Q23)
+```{r import saresp prop}
+saresp <- read_csv2(paste0("output/selecao/saresp_v1_", params$serie,".csv"))
+head(saresp)
+```
+
+```{r cruza saresp}
+teste <- df %>% 
+  left_join(saresp, by = "id_escola")
+summary(teste)
+```
+
+
+```{r lm q21_spp}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + tx_resp_q010g_B + tx_resp_q010e_B + I(tx_resp_q010b_B^2) + tx_resp_q010h_B + tx_resp_q012_A+ tx_resp_q009g_B + tx_resp_q003a_B + tx_resp_q017e_A + tx_resp_q004_E + tx_resp_q002_A + ipvs567_ipvs + q21_C_spp*q21_E_spp,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+```{r lm q22_spp}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + tx_resp_q010g_B + tx_resp_q010e_B + I(tx_resp_q010b_B^2) + tx_resp_q010h_B + tx_resp_q012_A+ tx_resp_q009g_B + tx_resp_q003a_B + tx_resp_q017e_A + tx_resp_q004_E + tx_resp_q002_A + ipvs567_ipvs + q22_C_spp * q22_E_spp,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+
+```{r lm q23_spp}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + tx_resp_q010g_B + tx_resp_q010e_B + I(tx_resp_q010b_B^2) + tx_resp_q010h_B + tx_resp_q012_A+ tx_resp_q009g_B + tx_resp_q003a_B + tx_resp_q017e_A + tx_resp_q004_E + tx_resp_q002_A + ipvs567_ipvs +  q23_D_spp * q23_E_spp,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+
+```{r lm q39_spp}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + tx_resp_q010g_B + tx_resp_q010e_B + I(tx_resp_q010b_B^2) + tx_resp_q010h_B + tx_resp_q012_A+ tx_resp_q009g_B + tx_resp_q003a_B + tx_resp_q017e_A + tx_resp_q004_E + tx_resp_q002_A + ipvs567_ipvs + q39_A_spp,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+
+
+
+
+# Book Saeb
+```{r}
+saeb <- read_csv2(paste0("output/books/saeb", params$serie,"_prop.csv"))
+head(saeb)
+```
+
+# Pilares
+```{r}
+pilar <- read_csv2(paste0("output/pilares/pilar_familia_", params$serie,".csv"))
+head(pilar)
+```
+
+
+```{r}
+teste <- df %>% 
+  select(id_escola, nivel_socio_economico, ipvs567_ipvs, media) %>% 
+  left_join(saeb, by = "id_escola") %>% 
+  left_join(pilar, by = "id_escola") %>% 
+  left_join(saresp[,c("id_escola","q23_D_spp","q23_E_spp")], by = "id_escola")
+
+```
+
+Com vários bens ficou muito diferente por fold
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + ipvs567_ipvs + pilar_familia + pilar_letramento + pilar_regiao + pilar_localizacao + pilar_bens + tx_resp_q017e_A + tx_resp_q002_A,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+
+## Pilar_familia
+1. Variáveis: tx_resp_q003a_B * tx_resp_q003b_B * tx_resp_q003c_B
+2. R2 Máximo individual: 22
+3. R2 Interação: 27,1
+4. R2 Pilar 27,5
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ pilar_familia,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+## Pilar_letramento
+1. Variáveis: tx_resp_q004_A * tx_resp_q004_E * tx_resp_q005_E
+2. R2 Máximo individual: 22,4
+3. R2 Interação: 26,3
+4. R2 Pilar 26,6
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ tx_resp_q004_A * tx_resp_q004_E * tx_resp_q005_E,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+
+## Pilar_regiao
+1. Variáveis: tx_resp_q008a_B + tx_resp_q008b_B + tx_resp_q008c_B
+2. R2 Máximo individual: 12,6
+3. R2 Interação: 22,3
+4. R2 Pilar 25,2
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ tx_resp_q008a_B * tx_resp_q008b_B * tx_resp_q008c_B,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+## Pilar_localizacao
+1. Variáveis: tx_resp_q011_A * tx_resp_q012_A * tx_resp_q012_C * tx_resp_q012_F
+2. R2 Máximo individual: 30,9
+3. R2 Interação: 39,0
+4. R2 Pilar 36,8
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ tx_resp_q011_A * tx_resp_q012_A * tx_resp_q012_C * tx_resp_q012_F,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+
+## Pilar_bens
+1. Variáveis: tx_resp_q010b_B * tx_resp_q010e_B * tx_resp_q010g_B * tx_resp_q010i_B
+2. R2 Máximo individual: 37,9
+3. R2 Interação: 38,6
+4. R2 Pilar 45,5
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ tx_resp_q010b_B * tx_resp_q010e_B * tx_resp_q010g_B * tx_resp_q010i_B,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+results$rf <- model_ranger$resample$Rsquared
+mean(results$rf)
+```
+A maioria dos pilares fica melhor como pilar do que interação
+
+## Teste de pilares + variáveis individuais que não entraram no pilar
+
+0. 5669715
+1. tx_resp_q009c_A: 0.5669715
+2. tx_resp_q009c_C: 0.5697736
+3. tx_resp_q009d_D: 0.568632
+4. tx_resp_q009g_A: 0.5666057
+5. tx_resp_q010d_B: 0.5658191
+6. tx_resp_q010f_B: 0.5647867
+7. tx_resp_q010h_B: 0.563693
+8. tx_resp_q017c_B: 0.5700682
+9. q23_D_spp * q23_E_spp: 0.580266
+```{r}
+set.seed(231192)
+model_ranger <- train(media ~ nivel_socio_economico + ipvs567_ipvs + pilar_familia + pilar_letramento + pilar_regiao + pilar_localizacao + pilar_bens + tx_resp_q017e_A + tx_resp_q002_A+ q23_D_spp * q23_E_spp,
+                        data = teste %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+results
+mean(results$rf)
+```
+
+

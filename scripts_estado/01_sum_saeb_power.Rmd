@@ -1,0 +1,116 @@
+---
+title: "Cria book Saeb v2"
+output: html_notebook
+params:
+  serie: '5ef'
+---
+
+```{r message=FALSE}
+library(tidyverse)
+library(fastDummies)
+```
+
+
+# Importa questionário Saeb
+```{r}
+url <- paste0("data/microdados_saeb_2019_v2/DADOS/TS_ALUNO_", toupper(params$serie), ".csv")
+saeb <- read_csv(url , na = c("*","."))
+
+colnames(saeb) <- tolower(colnames(saeb))
+head(saeb)
+```
+
+# Filtra escolas de SP
+* excluindo as escolas Federais
+* que preencheu total ou parcialmente o questionário
+* que preencheu total ou parcialmente a prova
+```{r}
+saeb_filter <- saeb %>% 
+  filter(id_uf == 35,
+         id_dependencia_adm %in% c(2,3),
+         in_preenchimento_lp == 1|| in_preenchimento_mt == 1,
+         in_preenchimento_questionario == 1)
+```
+
+# Transforma
+
+```{r}
+saeb_filter <-  saeb_filter %>% 
+  mutate(
+         id_serie = toupper(params$serie)) %>% 
+  select(id_serie,
+         id_dependencia_adm,
+            id_escola,
+            id_aluno,
+            starts_with("tx_resp_q"))  
+  # mutate_if(is.character, ~replace(., is.na(.), "NA"))
+
+head(saeb_filter)
+```
+
+# Seleciona apenas questões socioeconômicas
+```{r}
+saeb_select <- saeb_filter %>% 
+  select(id_escola,
+         id_aluno,
+         tx_resp_q001:tx_resp_q005,
+           tx_resp_q007:tx_resp_q012,
+           tx_resp_q017a:tx_resp_q017c,
+           tx_resp_q017e:tx_resp_q018c)
+
+colnames(saeb_select)
+```
+
+# Cria dummy
+
+```{r}
+dummy <- saeb_select %>% 
+  dummy_cols(remove_selected_columns  = TRUE, ignore_na = TRUE)
+
+head(dummy)
+```
+
+
+# Qtd alunos por escola
+```{r}
+qtd_alunos <- dummy %>% 
+  group_by(id_escola) %>% 
+  summarise(qtd_alunos = n()) 
+
+head(qtd_alunos)
+```
+# Conta qtd de alunos que responderam aquela alternativa
+```{r}
+dummy2 <- dummy %>% 
+  group_by(id_escola) %>% 
+  summarise_at(vars(starts_with("tx")), list(sum), na.rm = TRUE) %>% 
+  left_join(qtd_alunos, by = "id_escola")
+  
+
+head(dummy2)
+```
+
+# Transforma contagem em percentual
+```{r}
+funcao <- function(questao, qtd_alunos) {
+  round((questao/qtd_alunos),3)
+}
+
+dummy3 <- dummy2 %>% 
+  mutate_at(vars(starts_with("tx")), ~funcao(.x,qtd_alunos))
+
+head(dummy3)
+```
+
+
+# Exporta + summary
+```{r}
+url <- paste0("output/books/saeb", params$serie, "_prop.csv")
+write.csv2(dummy3, url, row.names = FALSE, na = "")
+```
+
+
+```{r}
+summary(dummy3)
+```
+

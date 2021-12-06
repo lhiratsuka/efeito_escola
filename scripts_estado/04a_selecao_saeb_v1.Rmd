@@ -1,0 +1,132 @@
+---
+title: "Seleção de variáveis Saeb Sumarizado %"
+output: html_notebook
+params:
+  serie: '3em'
+---
+
+```{r Library, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(readxl)
+library(knitr)
+```
+
+# Import
+Base de público, Questionário Saeb sumarizado pelos percentuais
+
+```{r Import}
+#Publico
+df_publico <- read.csv2("output/books/df_publico.csv")
+#Saeb
+saeb <- read.csv2(paste0("output/books/saeb",params$serie,"_prop.csv"))
+
+#metadados
+label_saeb <- read_xlsx("selecao_variaveis.xlsx", sheet = "Saeb_alternativa")
+
+```
+
+# Base de público
+```{r Filtra série e escolas estaduais}
+
+df_publico <- df_publico %>% 
+  filter(id_serie == toupper(params$serie),
+         id_dependencia_adm == 'Estadual')
+head(df_publico)
+```
+
+
+# Base Saeb
+```{r Filtra Saeb}
+saeb_filter <- saeb %>% 
+  filter(id_escola %in% df_publico$id_escola)
+
+paste("Nº colunas originais:", ncol(saeb_filter))
+```
+
+## Remove variáveis com zero ou baixa variância
+
+```{r Colunas removidas Saeb}
+remove_cols <- nearZeroVar(saeb_filter, names = TRUE)
+remove_cols 
+```
+```{r Colunas finais Saeb}
+total_vars <- colnames(saeb)
+final_cols <- setdiff(total_vars, remove_cols)
+final_cols
+```
+
+
+```{r Base final Saeb}
+saeb_final <- saeb_filter[, final_cols]
+head(saeb_final)
+
+paste("Nº colunas finais:", ncol(saeb_final))
+```
+
+# Análise Univariada
+```{r Cruza público com Saeb}
+saeb_modelo <- df_publico %>% 
+  select(id_escola,
+         media) %>% 
+  left_join(saeb_final, by = "id_escola")
+```
+
+
+
+```{r Parâmetros da regressão univariada Saeb}
+y_resp <- "media"
+vars_modelo <- colnames(saeb_modelo)[-c(1,2)]
+
+
+tb_r2 <- data.frame(coluna = vars_modelo)
+
+tb_r2 <- tb_r2 %>% 
+  #mutate(questao = substr(var, 9, nchar(var)-2)) %>% 
+  left_join(label_saeb[,c("coluna","label")], by = "coluna")
+
+head(tb_r2, 10)
+rsquared <- c()
+```
+```{r Looping de regressão linear Saeb}
+for (variable in vars_modelo) {
+lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+model_lm <- lm(lm_formula, saeb_modelo)
+rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+tb_r2$rsquared <- rsquared
+
+
+tb_r2 %>% arrange(desc(rsquared)) %>% kable()
+```
+```{r}
+qtd_var <- tb_r2 %>% filter(rsquared > 0.1) %>% nrow()
+paste("Qtd de variáveis selecionadas:",qtd_var)
+```
+
+```{r exporta tabela de r2}
+url <- paste0("output/selecao/r2_saeb_prop_", params$serie, ".csv")
+write.csv2(tb_r2, url, row.names = FALSE, na = "")
+```
+
+## Variáveis Selecionadas Saeb
+```{r Top 10 e r2 > 5%}
+top_20 <- tb_r2 %>% arrange(desc(rsquared)) %>% top_n(20) %>% filter(rsquared >= 0.1) %>% arrange(coluna)
+var_saeb_selec <- top_20$coluna
+var_saeb_selec
+```
+
+# Gera Base final do modelo
+```{r Cruza publico com Saeb e Saresp finais}
+data <- df_publico %>% 
+  left_join(saeb_final[,c("id_escola",var_saeb_selec)], by = "id_escola")
+
+glimpse(data)
+```
+
+```{r Exporta}
+url <- paste0("output/selecao/base_v1_",params$serie,".csv")
+write.csv2(data, url, row.names = FALSE, na = "")
+
+```
+

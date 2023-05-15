@@ -22,3 +22,6 @@ Para a criação do IEE, foram realizadas as seguintes etapas do trabalho:
 6.	Criação de Macro variáveis/Pilares
 7.	Fitting do Modelo
 8.	Criação do IEE (Indicador Efeito Escola) e Ranking das escolas
+
+
+*Obs: Alguns scripts de testes, versões intermediárias do modelo e análise exploratória não foram disponibilizados*

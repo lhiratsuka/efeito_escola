@@ -1,0 +1,111 @@
+---
+title: "Cria book Saresp v1"
+output: html_notebook
+params:
+  serie: '3em'
+  nome: 'EM-3ª série'
+---
+
+```{r message=FALSE}
+library(tidyverse)
+library(fastDummies)
+```
+
+
+# Importa questionário Saeb
+```{r}
+saresp_pais <- read_csv2("data/saresp/Questionario_pais_2019.csv", na = c(NA,"NULL", "", "*"))
+colnames(saresp_pais) <- tolower(colnames(saresp_pais))
+head(saresp_pais)
+```
+```{r}
+table(saresp_pais$serie)
+```
+
+# Filtra questões selecionadas e que já não estejam no Saeb
+```{r}
+saresp_pais_trata <- saresp_pais %>% 
+  filter(!is.na(q21),!is.na(q50)) %>% 
+  mutate(id_escola = as.integer(paste0("35",cd_ue)),
+         serie = as.factor(serie)
+  ) %>% 
+  select(cd_aluno,
+         id_escola,
+         serie,
+         q21,
+         q22,
+         q23,
+         q39,
+         q43,
+         q44,
+         q48,
+         q49,
+         q50
+         ) 
+
+head(saresp_pais_trata)
+```
+
+
+# Cria dummy
+
+```{r}
+
+dummy <- saresp_pais_trata %>% 
+  filter(serie == params$nome) %>% 
+  select(-serie) %>% 
+  dummy_cols(remove_selected_columns  = TRUE, ignore_na = TRUE)
+
+head(dummy)
+```
+
+# Qtd alunos por escola
+```{r}
+qtd_alunos <- dummy %>% 
+  group_by(id_escola) %>% 
+  summarise(qtd_alunos = n()) 
+
+head(qtd_alunos)
+```
+
+# Conta qtd de alunos que responderam aquela alternativa
+```{r}
+dummy2 <- dummy %>% 
+  group_by(id_escola) %>% 
+  summarise_at(vars(starts_with("q")), list(sum), na.rm = TRUE) %>% 
+  left_join(qtd_alunos, by = "id_escola")
+  
+
+head(dummy2)
+```
+
+# Transforma contagem em percentual
+```{r}
+funcao <- function(questao, qtd_alunos) {
+  round((questao/qtd_alunos),3)
+}
+
+dummy3 <- dummy2 %>% 
+  mutate_at(vars(starts_with("q")), ~funcao(.x,qtd_alunos))
+
+head(dummy3)
+```
+
+# Rename
+```{r}
+final <- dummy3 %>% 
+  mutate(serie = toupper(params$serie)) %>%
+  select(id_escola,
+         serie,
+         starts_with('q'),
+         -qtd_alunos) %>% 
+  rename_at(vars(-id_escola,-serie), ~paste0(., "_spp"))
+
+colnames(final)
+```
+
+# Exporta + summary
+```{r}
+url <- paste0("output/books/saresp", params$serie, "_prop.csv")
+write.csv2(final, url, row.names = FALSE, na = "")
+```

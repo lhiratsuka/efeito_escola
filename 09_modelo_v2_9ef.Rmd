@@ -1,0 +1,195 @@
+---
+title: "R Notebook"
+output: html_notebook
+params:
+  serie: '9ef'
+---
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(timereg)
+```
+
+# Import
+## Publico
+```{r}
+df_publico <- read.csv2("../output/books/df_publico.csv", na = "")
+df <- df_publico %>% 
+  filter(id_dependencia_adm == 'Estadual',
+         id_serie == toupper(params$serie)) %>% 
+  select(id_escola, 
+         co_distrito,
+         id_municipio,
+         media,
+         nivel_socio_economico)
+
+head(df)
+```
+
+
+
+
+## Saeb Book
+```{r Import saeb}
+url <- paste0("../output/books/saeb", params$serie, "_prop.csv")
+saeb <- read.csv2(url, na = "")
+head(saeb)
+```
+
+```{r}
+saeb <- saeb %>% 
+  select(id_escola,
+         tx_resp_q017e_A,
+         tx_resp_q002_A)
+```
+
+## Pilares
+```{r}
+pilar <- read_csv2(paste0("../output/pilares/pilar_", params$serie,".csv"))
+head(pilar)
+```
+```{r}
+pilar <- pilar %>% 
+  select(id_escola,
+         pilar_familia,
+         pilar_letramento,
+         pilar_regiao,
+         pilar_bens_eletrodomesticos,
+         pilar_bens_comodos
+         )
+```
+
+## Saresp
+```{r import saresp prop}
+saresp <- read_csv2(paste0("../output/selecao/saresp_v1_", params$serie,".csv"))
+head(saresp)
+```
+```{r}
+saresp <- saresp %>% 
+  select(id_escola,
+         q23_D_spp,
+         q23_C_spp)
+```
+
+## Seade
+```{r}
+seade <- read_csv2(paste0("../output/books/seade", params$serie,".csv"))
+seade <- seade %>% 
+  select(id_municipio,
+         idh_longevidade_2010_imp)
+head(seade)
+```
+# Integra
+```{r}
+df <- df %>% 
+  left_join(pilar, by = "id_escola") %>% 
+  left_join(saeb, by = "id_escola") %>% 
+  left_join(saresp, by = "id_escola") %>% 
+  left_join(seade, by = "id_municipio") %>% 
+  select(-co_distrito, -id_municipio)
+glimpse(df)
+```
+
+# Trata
+## INSE
+```{r}
+df <- df %>% 
+  mutate(
+        nivel_socio_economico = 
+               factor(case_when(
+                 nivel_socio_economico %in% c(NA,'Nível II','Nível III') ~ 'Nível IV',
+                         TRUE ~ nivel_socio_economico)))
+table(df$nivel_socio_economico)
+```
+# CV
+```{r createfolds}
+set.seed(231192)
+myFolds <- createFolds(df$media, k = 5)
+trControl <- trainControl(
+  method = "cv",
+  number = 5,
+  index = myFolds
+)
+
+results <- data.frame(fold = c('Fold 1', 'Fold 2', 'Fold 3', 'Fold 4', 'Fold 5'))
+```
+
+
+# Modelos
+1. lm: 0.5861684
+2. ranger: 0.5608338
+3. xgb: 0.5394691
+
+```{r warning=FALSE, message=FALSE}
+set.seed(231192)
+model <- train(media ~ nivel_socio_economico + pilar_familia + pilar_letramento + pilar_regiao + pilar_bens_eletrodomesticos + pilar_bens_comodos + I(tx_resp_q002_A^2) + I(tx_resp_q017e_A^2) + q23_D_spp + q23_C_spp + idh_longevidade_2010_imp,
+                        data = df,
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+mean(model$resample$Rsquare)
+```
+
+
+# Predict
+```{r}
+df$nota_estimada <- predict(model, df, type = "raw")
+```
+
+# Ranking
+```{r}
+ranking <- df %>% 
+  arrange(desc(media)) %>% 
+  mutate(diff = round(media - nota_estimada),
+         ranking_nota = row_number()) %>% 
+  arrange(desc(diff)) %>% 
+  mutate(ranking_iee = row_number(),
+         diff_ranking = ranking_nota - ranking_iee,
+         grupo_ranking_nota = factor(qcut(ranking_nota), labels = c('G1','G2','G3','G4')),
+         grupo_ranking_iee = factor(qcut(ranking_iee), labels = c('G1','G2','G3','G4')))
+
+head(ranking)
+```
+
+## Export Base Modelo v2
+```{r}
+
+table(ranking$grupo_ranking_nota, ranking$grupo_ranking_iee)
+
+url <- paste0("output/v2/ranking", params$serie, ".csv")
+write.csv2(ranking, url, row.names = FALSE, na = "")
+```
+
+# Gera iee
+```{r}
+ranking <- ranking %>% 
+      select(
+      id_escola,
+      media,
+      nota_estimada,
+      diff,
+      ranking_nota,
+      ranking_iee,
+      diff_ranking,
+      grupo_ranking_nota,
+      grupo_ranking_iee)
+```
+
+```{r}
+iee <-  df_publico %>% 
+    select(-starts_with('media')) %>% 
+    mutate(tx_participacao = round(nu_presentes/nu_matriculados_censo,2)) %>% 
+    filter(id_dependencia_adm == 'Estadual',
+           id_serie == toupper(params$serie)) %>% 
+    left_join(ranking, by = "id_escola")
+
+glimpse(iee)
+```
+
+## Export IEE Final
+```{r}
+url <- paste0("output/v2/iee_", params$serie, "_v2.csv")
+write.csv2(iee, url, row.names = FALSE, na = "")
+```
+

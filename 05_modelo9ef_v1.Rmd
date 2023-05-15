@@ -1,0 +1,355 @@
+---
+title: "R Notebook"
+output: html_notebook
+params:
+  serie: '9ef'
+---
+
+# Import
+```{r packages, warning=FALSE,error=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(timereg)
+library(MLmetrics)
+options(scipen = 999)
+set.seed(231192)
+```
+
+## Saeb
+```{r Import saeb}
+url <- paste0("../output/selecao/base_v1_", params$serie, ".csv")
+saeb <- read.csv2(url, na = "")
+head(saeb)
+```
+
+### Questões
+Excluir tx_resp_q017a_A (lazer) pois pode estar indiretamente ligada à escola
+```{r colnames Saeb}
+saeb %>% select(starts_with("tx")) %>% colnames()
+```
+```{r exclui tx_resp_q017a_A}
+saeb <- saeb %>% 
+  select(-tx_resp_q017a_A)
+```
+
+
+```{r Saeb Missing}
+colSums(is.na(saeb))
+```
+
+## Adiciona variáveis do IPVS
+```{r import ipvs}
+url <- paste0("../output/books/ipvs", params$serie, ".csv")
+ipvs <- read.csv2(url)
+head(ipvs)
+```
+```{r IPVS Missing}
+colSums(is.na(ipvs))
+```
+
+
+
+```{r cruza saeb e ipvs}
+cruza_ipvs <- saeb %>% 
+  left_join(ipvs, by = c("co_distrito", "id_serie"))
+head(cruza_ipvs)
+```
+
+## Adiciona variáveis do Seade
+```{r import seade}
+url <- paste0("../output/books/seade", params$serie, ".csv")
+seade <- read.csv2(url)
+head(seade)
+```
+
+```{r Seade missing}
+colSums(is.na(seade))
+```
+
+
+```{r cruza com seade}
+cruza_seade <- cruza_ipvs %>% 
+  left_join(seade, by = c("id_municipio", "id_serie"))
+head(cruza_seade)
+```
+
+
+```{r checa NA pós cruzamentos}
+colSums(is.na(cruza_seade))
+```
+
+# Input Missing 
+```{r nascidos_vivos}
+input_missing <- cruza_seade %>% mutate(
+  nivel_socio_economico = replace_na(nivel_socio_economico, 'NA'),
+  nivel_socio_economico = as.factor(nivel_socio_economico))
+summary(input_missing$nivel_socio_economico)
+```
+
+# Cria base do modelo
+Exclui variáveis do df_publico
+
+```{r trata saeb}
+df <- input_missing %>% 
+    select(id_escola,
+           media,
+           nivel_socio_economico,
+           starts_with("tx"),
+           ends_with("ipvs"),
+           ends_with("imp")
+           ) 
+
+glimpse(df)
+
+```
+# CV
+
+```{r createfolds}
+set.seed(231192)
+myFolds <- createFolds(df$media, k = 5)
+trControl <- trainControl(
+  method = "cv",
+  number = 5,
+  index = myFolds
+)
+
+results <- data.frame(fold = c('Fold 1', 'Fold 2', 'Fold 3', 'Fold 4', 'Fold 5'))
+results
+```
+# Modelos
+## Ranger
+Random forest básico com saeb + ipvs + seade: 0.3904392 (v0) -> 0.5578731 (v1)
+```{r ranger todas variaveis}
+set.seed(231192)
+model_ranger <- train(media ~.,
+                        data = df %>% select(-id_escola),
+                        method = "ranger",
+                        metric = "Rsquared",
+                        importance = 'permutation',
+                        trControl = trControl)
+
+
+results$rf <- model_ranger$resample$Rsquared
+results
+mean(results$rf)
+```
+Predict ranger1: 0.4201159
+```{r predict ranger 1}
+df$pred_ranger1 <- predict(model_ranger, df, type = "raw")
+R2_Score(df$pred_ranger1,df$media)
+```
+VAriable importance
+```{r iv ranger}
+iv <- data.frame(importance = model_ranger$finalModel$variable.importance)
+iv %>% arrange(desc(importance)) %>%  head(15)
+```
+
+# Trata principais variáveis
+```{r funcao resumo}
+resumo <- function(data, var) {
+  data %>% 
+    group_by({{ var }}) %>% 
+  summarise(n = n(),
+            nota = mean(media)) %>% 
+  arrange(nota)
+}
+```
+
+## Nivel_socioeconomico
+```{r var1}
+resumo(df,nivel_socio_economico)
+
+df <- df %>% 
+  mutate(nivel_socio_economico = as.character(nivel_socio_economico),
+        nivel_socio_economico = 
+               factor(case_when(
+                 nivel_socio_economico %in% c('NA','Nível II','Nível III') ~ 'Nível IV',
+                         TRUE ~ nivel_socio_economico)))
+
+resumo(df,nivel_socio_economico)
+```
+
+## tx_resp_q010i_B
+Fora da escola em dias de aula, quanto tempo você usa para: - Trabalhar fora de casa (recebendo ou não um salário). Não uso meu tempo para isso.
+```{r var2}
+ggplot(df, aes(tx_resp_q017e_A, media)) +
+  geom_point(color = "blue", alpha = 0.5)
+```
+## tx_resp_q010d_B
+Na sua casa tem: - Mesa para estudar (ou escrivaninha). Sim.
+```{r var3}
+ggplot(df, aes(tx_resp_q010d_B, media)) +
+  geom_point(color = "blue", alpha = 0.5)
+```
+## tx_resp_q003a_B
+Normalmente, quem mora na sua casa? - Mãe (mães ou madrasta). Sim.
+```{r var4}
+ggplot(df, aes(tx_resp_q003a_B, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+## tx_resp_q002_A
+Qual é a sua cor ou raça? Branca.
+```{r var5}
+ggplot(df, aes(tx_resp_q002_A, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+## tx_resp_q010g_B
+Na sua casa tem: - Forno de microondas. Sim.
+```{r var6}
+ggplot(df, aes(tx_resp_q010g_B, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+
+## tx_resp_q004_F
+Qual é a maior escolaridade da sua mãe (ou mulher responsável por você)? Não sei.
+```{r var7}
+ggplot(df, aes(tx_resp_q004_F, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+## tx_resp_q005_F
+Qual é a maior escolaridade de seu pai (ou homem responsável por você)? Não sei.
+```{r var8}
+ggplot(df, aes(tx_resp_q005_F, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+
+## tx_resp_q012_F
+Considerando a maior distância percorrida, normalmente de que forma você chega à sua escola? De carro.
+```{r var9}
+ggplot(df, aes(tx_resp_q012_F, media)) +
+  geom_point(color = "blue", alpha = 0.5) 
+```
+
+## tx_resp_q010h_B
+Na sua casa tem: - Máquina de lavar roupa. Sim.
+```{r var10}
+ggplot(df, aes(tx_resp_q010h_B, media)) +
+  geom_point(color = "blue", alpha = 0.5)
+```
+
+# Testes de modelo
+Random forest básico com saeb + ipvs + seade:  0.5578731 (meanFolds)
+## Random forest básico com 
+1. nivel_socio_economico: 0.2839236
+2. tx_resp_q010i_B (freezer): 0.4029355
+3. tx_resp_q010d_B (escrivaninha): 0.4454429
+4. tx_resp_q003a_B (mora c/mãe): 0.4858886
+5. tx_resp_q002_A (raça): 0.5118694
+0. tx_resp_q010g_B (microondas): 0.5123847
+6. tx_resp_q004_F (formação mãe): 0.5398599
+7. tx_resp_q005_F (formação pai): 0.5464417
+8. tx_resp_q012_F (percurso): 0.5505699
+9. v22_ipvs (1/8 a 1/2SM): 0.5549723
+10. idh_longevidade_2010_imp: 0.5576149
+
+## R2 Random Forest
+0.5576149
+```{r ranger}
+set.seed(231192)
+model_ranger2 <- train(media ~ nivel_socio_economico + tx_resp_q010i_B + tx_resp_q010d_B + tx_resp_q003a_B + tx_resp_q002_A + tx_resp_q004_F + tx_resp_q005_F + tx_resp_q012_F + v22_ipvs + idh_longevidade_2010_imp,
+                        data = df %>% select(-id_escola),
+                        method = "ranger",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+mean(model_ranger2$resample$Rsquare)
+```
+
+R2 na base full: 0.9004255
+```{r predic ranger2}
+df$pred_ranger2 <- predict(model_ranger2, df, type = "raw")
+R2_Score(df$pred_ranger2,df$media)
+```
+## R2 LM
+0.5647067
+Trabalhei as variávreis correlacionadas:
+* 4 com 5: interação
+* 9g com  10g: não foram usadas
+```{r lm}
+set.seed(231192)
+model_lm <- train(media ~ nivel_socio_economico + tx_resp_q010i_B + tx_resp_q010d_B + tx_resp_q003a_B + tx_resp_q002_A + tx_resp_q004_F * tx_resp_q005_F + tx_resp_q012_F + v22_ipvs + idh_longevidade_2010_imp,
+                        data = df %>% select(-id_escola),
+                        method = "lm",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+mean(model_lm$resample$Rsquare)
+
+df$pred_lm <- predict(model_lm, df, type = "raw")
+R2_Score(df$pred_lm,df$media)
+```
+```{r}
+model_lm$finalModel
+```
+
+## R2 Xgb
+0.5468044
+```{r xgb, warning=FALSE,message=FALSE}
+set.seed(231192)
+model_xgb <- train(media ~ nivel_socio_economico + tx_resp_q010i_B + tx_resp_q010d_B + tx_resp_q003a_B + tx_resp_q002_A + tx_resp_q004_F + tx_resp_q005_F + tx_resp_q012_F + v22_ipvs + idh_longevidade_2010_imp,
+                        data = df %>% select(-id_escola),
+                        method = "xgbTree",
+                        metric = "Rsquared",
+                        trControl = trControl)
+
+
+
+df$pred_xgb <- predict(model_xgb, df, type = "raw")
+mean(model_xgb$resample$Rsquare)
+R2_Score(df$pred_xgb,df$media)
+```
+
+
+
+
+# Predict 
+```{r}
+df_predict <- df %>% 
+  transmute(
+    id_escola,
+    nivel_socio_economico,
+    tx_resp_q010i_B,
+    tx_resp_q010d_B,
+    tx_resp_q003a_B,
+    tx_resp_q002_A,
+    tx_resp_q004_F,
+    tx_resp_q005_F,
+    tx_resp_q012_F,
+    v22_ipvs,
+    idh_longevidade_2010_imp,
+    media,
+    nota_estimada = pred_lm,
+    diff = round(media - nota_estimada))
+
+head(df_predict)
+```
+
+```{r}
+ranking <- df_predict %>% 
+  arrange(desc(media)) %>% 
+  mutate(ranking_nota = row_number()) %>% 
+  arrange(desc(diff)) %>% 
+  mutate(ranking_iee = row_number(),
+         diff_ranking = ranking_nota - ranking_iee,
+         grupo_ranking_nota = factor(qcut(ranking_nota), labels = c('G1','G2','G3','G4')),
+         grupo_ranking_iee = factor(qcut(ranking_iee), labels = c('G1','G2','G3','G4')))
+
+head(ranking)
+``` 
+
+# IEE
+```{r}
+
+table(ranking$grupo_ranking_nota, ranking$grupo_ranking_iee)
+
+url <- paste0("output/v1/ranking", params$serie, ".csv")
+write.csv2(ranking, url, row.names = FALSE, na = "")
+```
+
+
+
+
+
+
+

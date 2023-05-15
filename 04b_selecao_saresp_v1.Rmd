@@ -1,0 +1,138 @@
+---
+title: "Seleção de variáveis Saresp Sumarizado %"
+output: html_notebook
+params:
+  serie: '5ef'
+---
+
+```{r Library, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(readxl)
+library(knitr)
+```
+
+# Import
+Base de público, Questionário Saeb sumarizado pelos percentuais
+
+```{r Import}
+#Publico
+df_publico <- read.csv2("output/books/df_publico.csv")
+#Saeb
+saresp <- read.csv2(paste0("output/books/saresp",params$serie,"_prop.csv"))
+```
+
+# Base de público
+```{r Filtra série e escolas estaduais}
+
+df_publico <- df_publico %>% 
+  filter(id_serie == toupper(params$serie),
+         id_dependencia_adm == 'Estadual')
+head(df_publico)
+```
+
+
+# Base saresp
+```{r Filtra Saeb}
+saresp_filter <- saresp %>% 
+  filter(id_escola %in% df_publico$id_escola)
+
+paste("Nº colunas originais:", ncol(saresp_filter))
+```
+
+## Remove variáveis com zero ou baixa variância
+
+```{r Colunas removidas Saeb}
+remove_cols <- nearZeroVar(saresp_filter, names = TRUE)
+remove_cols 
+```
+```{r Colunas finais Saeb}
+total_vars <- colnames(saresp)
+final_cols <- setdiff(total_vars, remove_cols)
+final_cols
+```
+
+
+```{r Base final Saeb}
+saresp_final <- saresp_filter[, final_cols]
+head(saresp_final)
+
+paste("Nº colunas finais:", ncol(saresp_final))
+```
+
+# Análise Univariada
+```{r Cruza público com Saeb}
+saresp_modelo <- df_publico %>% 
+  select(id_escola,
+         media) %>% 
+  left_join(saresp_final, by = "id_escola")
+
+colSums(is.na(saresp_modelo))/nrow(saresp_modelo)
+```
+#Input missing
+```{r}
+summary(saresp_modelo)
+```
+```{r}
+df <- saresp_modelo %>% 
+  mutate_all(~ifelse(is.na(.x), mean(.x, na.rm = TRUE), .x))
+
+summary(df)
+```
+
+
+```{r Parâmetros da regressão univariada Saeb}
+y_resp <- "media"
+vars_modelo <- colnames(saresp_modelo)[-c(1,2)]
+
+
+tb_r2 <- data.frame(coluna = vars_modelo)
+
+rsquared <- c()
+```
+
+```{r Looping de regressão linear Saeb}
+for (variable in vars_modelo) {
+lm_formula <- as.formula(str_glue("{y_resp} ~ {variable}"))
+model_lm <- lm(lm_formula, df)
+rsquared <- append(rsquared, summary(model_lm)$r.squared)
+}
+tb_r2$rsquared <- rsquared
+
+
+tb_r2 %>% arrange(desc(rsquared)) %>% kable()
+```
+
+```{r}
+qtd_var <- tb_r2 %>% filter(rsquared > 0.1) %>% nrow()
+paste("Qtd de variáveis selecionadas:",qtd_var)
+```
+
+```{r exporta tabela de r2}
+url <- paste0("output/selecao/r2_saresp_prop_", params$serie, ".csv")
+write.csv2(tb_r2, url, row.names = FALSE, na = "")
+```
+
+## Variáveis Selecionadas Saeb
+```{r Top 10 e r2 > 5%}
+top_20 <- tb_r2 %>% arrange(desc(rsquared)) %>% top_n(20) %>% filter(rsquared >= 0.1) %>% arrange(coluna)
+var_saeb_selec <- top_20$coluna
+var_saeb_selec
+```
+
+# Gera Base final do modelo
+```{r Cruza publico com Saeb e Saresp finais}
+data <- df_publico %>% 
+  select(id_serie,
+         id_escola) %>% 
+  left_join(df[,c("id_escola",var_saeb_selec)], by = "id_escola")
+
+glimpse(data)
+```
+
+```{r Exporta}
+url <- paste0("output/selecao/saresp_v1_",params$serie,".csv")
+write.csv2(data, url, row.names = FALSE, na = "")
+
+```
+
